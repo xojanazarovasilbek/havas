@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Havas POS - Kassa Tizimi</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --bg: #f8fafc;
+            --text: #1e293b;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .kassa-container { 
+            display: grid; 
+            grid-template-columns: 350px 1fr; 
+            gap: 25px; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+        }
+
+        .input-section { 
+            background: white; 
+            padding: 25px; 
+            border-radius: 15px; 
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            height: fit-content;
+        }
+
+        label { font-weight: 600; display: block; margin-bottom: 10px; color: #64748b; }
+
+        input, select { 
+            width: 100%; 
+            padding: 12px; 
+            font-size: 1.1em; 
+            border: 2px solid #e2e8f0; 
+            border-radius: 8px; 
+            box-sizing: border-box;
+            outline: none;
+            margin-bottom: 15px;
+        }
+
+        .total-box {
+            margin-top: 10px;
+            padding: 20px;
+            background: #eff6ff;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        #total { font-size: 2.5em; font-weight: 800; color: var(--success); display: block; }
+
+        .btn-finish {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .cart { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 15px; border-bottom: 2px solid #f1f5f9; color: #64748b; }
+        td { padding: 15px; border-bottom: 1px solid #f1f5f9; }
+
+        .qty-btn { background: #e2e8f0; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+        .delete-btn { background: #fee2e2; color: var(--danger); border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
+        
+        .help-text { font-size: 0.85em; color: #94a3b8; margin-top: -10px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <h1 style="margin: 0; color: var(--primary);">🛒 HAVAS POS</h1>
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <span style="font-weight: bold; color: #64748b;">👤 Kassir: {{ user.username }}</span>
+        <a href="{% url 'logout' %}" style="background: #f1f5f9; color: #ef4444; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid #fee2e2;">Chiqish 🚪</a>
+    </div>
+</div>
+
+<div class="kassa-container">
+    <div class="input-section">
+        <label>Shtrix-kod yoki Ichki kod:</label>
+        <input type="text" id="barcode-input" placeholder="Kod yoki Kod*Vazn..." autofocus>
+        <p class="help-text">Misol: 101*1.5 (101-kod, 1.5-kg)</p>
+        
+        <label>To'lov turi:</label>
+        <select id="payment-method">
+            <option value="cash">💵 Naqd pul</option>
+            <option value="card">💳 Plastik karta</option>
+            <option value="click">📲 Click</option>
+            <option value="payme">🟦 Payme</option>
+        </select>
+
+        <div class="total-box">
+            <h3>JAMI TO'LOV:</h3>
+            <span id="total">0</span>
+            <small>o'zbek so'mi</small>
+        </div>
+
+        <button onclick="finishSale()" class="btn-finish" style="margin-top: 20px;">SOTUVNI YAKUNLASH</button>
+    </div>
+
+    <div class="cart">
+        <table>
+            <thead>
+                <tr>
+                    <th>Mahsulot nomi</th>
+                    <th>Narxi (1kg/dona)</th>
+                    <th style="text-align: center;">Soni/Vazni</th>
+                    <th>Jami</th>
+                    <th>Amal</th>
+                </tr>
+            </thead>
+            <tbody id="cart-items"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const barcodeInput = document.getElementById('barcode-input');
+    const cartItemsHTML = document.getElementById('cart-items');
+    const totalDisplay = document.getElementById('total');
+    let cart = [];
+
+    barcodeInput.addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+            const inputVal = e.target.value.trim();
+            if (!inputVal) return;
+
+            let code = inputVal;
+            let weight = 1;
+
+            // Agar yulduzcha bo'lsa (Kod*Vazn mantiqi)
+            if (inputVal.includes('*')) {
+                const parts = inputVal.split('*');
+                code = parts[0];
+                weight = parseFloat(parts[1]) || 1;
+            }
+
+            // Serverga qidiruv yuboramiz
+            // Eslatma: get-product funksiyasi ham shtrix-kodni, ham ichki kodni tekshirishi kerak
+            fetch(`/get-product/?query=${code}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') { 
+                        addToCart(data, weight); 
+                    } else { 
+                        alert("Mahsulot topilmadi!"); 
+                    }
+                });
+            e.target.value = '';
+        }
+    });
+
+    function addToCart(product, qty) {
+        // Savatda borligini tekshirish (faqat donali tovarlar uchun)
+        const index = cart.findIndex(item => item.id === product.id);
+        
+        if (index > -1 && !product.is_weight) { 
+            cart[index].qty += qty; 
+        } else {
+            // Kilogramli bo'lsa yoki savatda bo'lmasa yangi qator qo'shadi
+            cart.push({ 
+                id: product.id, 
+                name: product.name, 
+                price: parseFloat(product.price), 
+                qty: qty,
+                is_weight: product.is_weight 
+            });
+        }
+        renderCart();
+    }
+
+    function changeQty(index, delta) {
+        if (cart[index].qty + delta > 0) { 
+            cart[index].qty += delta; 
+        } else { 
+            cart.splice(index, 1); 
+        }
+        renderCart();
+    }
+
+    function removeItem(index) {
+        cart.splice(index, 1);
+        renderCart();
+    }
+
+    function renderCart() {
+        cartItemsHTML.innerHTML = '';
+        let totalSum = 0;
+        cart.forEach((item, index) => {
+            const rowTotal = item.price * item.qty;
+            totalSum += rowTotal;
+            
+            // Kilogramli bo'lsa +- tugmalarini ko'rsatmaslik ham mumkin yoki qadamni 0.1 qilish mumkin
+            const qtyControls = item.is_weight ? 
+                `<span style="margin: 0 10px;">${item.qty} kg</span>` : 
+                `<button class="qty-btn" onclick="changeQty(${index}, -1)">-</button>
+                 <span style="margin: 0 10px;">${item.qty}</span>
+                 <button class="qty-btn" onclick="changeQty(${index}, 1)">+</button>`;
+
+            cartItemsHTML.innerHTML += `
+                <tr>
+                    <td><strong>${item.name}</strong></td>
+                    <td>${item.price.toLocaleString()} so'm</td>
+                    <td style="text-align: center;">${qtyControls}</td>
+                    <td><strong>${rowTotal.toLocaleString()} so'm</strong></td>
+                    <td><button class="delete-btn" onclick="removeItem(${index})">🗑️</button></td>
+                </tr>`;
+        });
+        totalDisplay.innerText = totalSum.toLocaleString();
+    }
+
+    async function finishSale() {
+        if (cart.length === 0) return alert("Savat bo'sh!");
+        
+        const method = document.getElementById('payment-method').value;
+
+        const response = await fetch('/complete-sale/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}' 
+            },
+            body: JSON.stringify({ 
+                cart: cart.map(i => ({id: i.id, qty: i.qty})),
+                payment_method: method
+            })
+        });
+
+        const result = await response.json();
+        if (result.status === 'success') {
+            alert("✅ Sotuv yakunlandi!");
+            location.reload();
+        } else {
+            alert("❌ Xato: " + result.message);
+        }
+    }
+</script>
+</body>
+</html>
