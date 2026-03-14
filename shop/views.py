@@ -33,13 +33,20 @@ def kassa_page(request):
     return render(request, 'shop/kassa.html')
 
 # MUHIM: Ham barcode, ham internal_code (ichki kod) bo'yicha qidirish
+from django.http import JsonResponse
+from django.db.models import Q  # <--- Buni albatta qo'shish kerak
+from .models import Product
+
 def get_product(request):
-    query = request.GET.get('query') # Endi 'barcode' emas, umumiy 'query'
+    # .strip() orqali koddagi tasodifiy bo'sh joylarni olib tashlaymiz
+    query = request.GET.get('query', '').strip() 
+    
     if not query:
         return JsonResponse({'status': 'error', 'message': 'Kod kiritilmadi'})
     
     try:
-        # Qidiruv: shtrix-koddan yoki ichki koddan (masalan: 101) qidiradi
+        # Qidiruv: Ham shtrix-kod, ham ichki kod bo'yicha
+        # filter(...).first() orqali agar topilmasa None qaytarishini ta'minlaymiz
         product = Product.objects.filter(
             Q(barcode=query) | Q(internal_code=query)
         ).first()
@@ -50,10 +57,12 @@ def get_product(request):
                 'id': product.id,
                 'name': product.name,
                 'price': float(product.price),
-                'is_weight': product.is_weight # Kilogramli yoki yo'qligi
+                # Agar is_weight maydoni bo'lmasa, default False qaytaradi
+                'is_weight': getattr(product, 'is_weight', False) 
             })
         else:
             return JsonResponse({'status': 'error', 'message': 'Mahsulot topilmadi!'})
+            
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)})
 

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Havas POS - Kassa Tizimi</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -11,6 +12,7 @@
             --danger: #dc2626;
             --bg: #f8fafc;
             --text: #1e293b;
+            --info: #0ea5e9;
         }
 
         body { 
@@ -50,6 +52,15 @@
             margin-bottom: 15px;
         }
 
+        #reader {
+            width: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid var(--info);
+            margin-bottom: 15px;
+            display: none; /* Dastlab yopiq turadi */
+        }
+
         .total-box {
             margin-top: 10px;
             padding: 20px;
@@ -70,6 +81,11 @@
             font-size: 1.1em;
             font-weight: bold;
             cursor: pointer;
+            margin-bottom: 10px;
+        }
+
+        .btn-camera {
+            background: var(--info);
         }
 
         .cart { 
@@ -101,6 +117,9 @@
 
 <div class="kassa-container">
     <div class="input-section">
+        <div id="reader"></div>
+        <button id="camera-btn" onclick="toggleCamera()" class="btn-finish btn-camera">📷 Kamera orqali skanerlash</button>
+
         <label>Shtrix-kod yoki Ichki kod:</label>
         <input type="text" id="barcode-input" placeholder="Kod yoki Kod*Vazn..." autofocus>
         <p class="help-text">Misol: 101*1.5 (101-kod, 1.5-kg)</p>
@@ -119,7 +138,7 @@
             <small>o'zbek so'mi</small>
         </div>
 
-        <button onclick="finishSale()" class="btn-finish" style="margin-top: 20px;">SOTUVNI YAKUNLASH</button>
+        <button onclick="finishSale()" class="btn-finish" style="margin-top: 20px; background: var(--success);">SOTUVNI YAKUNLASH</button>
     </div>
 
     <div class="cart">
@@ -143,45 +162,84 @@
     const cartItemsHTML = document.getElementById('cart-items');
     const totalDisplay = document.getElementById('total');
     let cart = [];
+    
+    // Skaner obyekti
+    const html5QrCode = new Html5Qrcode("reader");
+    let isScanning = false;
+
+    // Kamera funksiyasi
+    function toggleCamera() {
+        const cameraBtn = document.getElementById('camera-btn');
+        const readerDiv = document.getElementById('reader');
+
+        if (!isScanning) {
+            readerDiv.style.display = 'block';
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: { width: 250, height: 150 } },
+                (decodedText) => {
+                    // Kod topilganda
+                    processInput(decodedText);
+                    // Qisqa titrash (vibratsiya)
+                    if (navigator.vibrate) navigator.vibrate(100);
+                }
+            ).catch(err => alert("Kameraga ruxsat berilmadi yoki xato!"));
+
+            cameraBtn.innerText = "🛑 Kamerani o'chirish";
+            cameraBtn.style.background = "var(--danger)";
+            isScanning = true;
+        } else {
+            stopCamera();
+        }
+    }
+
+    function stopCamera() {
+        html5QrCode.stop().then(() => {
+            document.getElementById('reader').style.display = 'none';
+            const cameraBtn = document.getElementById('camera-btn');
+            cameraBtn.innerText = "📷 Kamera orqali skanerlash";
+            cameraBtn.style.background = "var(--info)";
+            isScanning = false;
+        });
+    }
+
+    // Inputni qayta ishlash (ham qo'lda, ham kamerada bitta funksiya)
+    function processInput(inputVal) {
+        if (!inputVal) return;
+
+        let code = inputVal;
+        let weight = 1;
+
+        if (inputVal.includes('*')) {
+            const parts = inputVal.split('*');
+            code = parts[0];
+            weight = parseFloat(parts[1]) || 1;
+        }
+
+        fetch(`/get-product/?query=${code}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') { 
+                    addToCart(data, weight); 
+                } else { 
+                    alert("Mahsulot topilmadi: " + code); 
+                }
+            });
+    }
 
     barcodeInput.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
-            const inputVal = e.target.value.trim();
-            if (!inputVal) return;
-
-            let code = inputVal;
-            let weight = 1;
-
-            // Agar yulduzcha bo'lsa (Kod*Vazn mantiqi)
-            if (inputVal.includes('*')) {
-                const parts = inputVal.split('*');
-                code = parts[0];
-                weight = parseFloat(parts[1]) || 1;
-            }
-
-            // Serverga qidiruv yuboramiz
-            // Eslatma: get-product funksiyasi ham shtrix-kodni, ham ichki kodni tekshirishi kerak
-            fetch(`/get-product/?query=${code}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.status === 'success') { 
-                        addToCart(data, weight); 
-                    } else { 
-                        alert("Mahsulot topilmadi!"); 
-                    }
-                });
+            processInput(e.target.value.trim());
             e.target.value = '';
         }
     });
 
     function addToCart(product, qty) {
-        // Savatda borligini tekshirish (faqat donali tovarlar uchun)
         const index = cart.findIndex(item => item.id === product.id);
         
         if (index > -1 && !product.is_weight) { 
             cart[index].qty += qty; 
         } else {
-            // Kilogramli bo'lsa yoki savatda bo'lmasa yangi qator qo'shadi
             cart.push({ 
                 id: product.id, 
                 name: product.name, 
@@ -214,7 +272,6 @@
             const rowTotal = item.price * item.qty;
             totalSum += rowTotal;
             
-            // Kilogramli bo'lsa +- tugmalarini ko'rsatmaslik ham mumkin yoki qadamni 0.1 qilish mumkin
             const qtyControls = item.is_weight ? 
                 `<span style="margin: 0 10px;">${item.qty} kg</span>` : 
                 `<button class="qty-btn" onclick="changeQty(${index}, -1)">-</button>
