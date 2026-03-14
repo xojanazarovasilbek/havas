@@ -168,31 +168,47 @@
     let isScanning = false;
 
     // Kamera funksiyasi
+// Kamera funksiyasi (Yangilangan)
     function toggleCamera() {
         const cameraBtn = document.getElementById('camera-btn');
         const readerDiv = document.getElementById('reader');
 
         if (!isScanning) {
             readerDiv.style.display = 'block';
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                { fps: 10, qrbox: { width: 250, height: 150 } },
-                (decodedText) => {
-                    // Kod topilganda
-                    processInput(decodedText);
-                    // Qisqa titrash (vibratsiya)
-                    if (navigator.vibrate) navigator.vibrate(100);
-                }
-            ).catch(err => alert("Kameraga ruxsat berilmadi yoki xato!"));
+            
+            // Orqa kamerani avtomatik qidirish
+            Html5Qrcode.getCameras().then(cameras => {
+                if (cameras && cameras.length > 0) {
+                    // Agar bir nechta kamera bo'lsa, oxirgisini (orqa kamera) tanlaymiz
+                    const cameraId = cameras.length > 1 ? cameras[cameras.length - 1].id : cameras[0].id;
+                    
+                    html5QrCode.start(
+                        cameraId, 
+                        { 
+                            fps: 15, 
+                            qrbox: { width: 250, height: 180 },
+                            aspectRatio: 1.0 
+                        },
+                        (decodedText) => {
+                            processInput(decodedText);
+                            if (navigator.vibrate) navigator.vibrate(100);
+                        }
+                    ).catch(err => {
+                        console.error(err);
+                        alert("Kamera ishga tushmadi. HTTPS va ruxsatlarni tekshiring.");
+                    });
 
-            cameraBtn.innerText = "🛑 Kamerani o'chirish";
-            cameraBtn.style.background = "var(--danger)";
-            isScanning = true;
+                    cameraBtn.innerText = "🛑 Kamerani o'chirish";
+                    cameraBtn.style.background = "var(--danger)";
+                    isScanning = true;
+                } else {
+                    alert("Kamera topilmadi!");
+                }
+            }).catch(err => alert("Xatolik: " + err));
         } else {
             stopCamera();
         }
     }
-
     function stopCamera() {
         html5QrCode.stop().then(() => {
             document.getElementById('reader').style.display = 'none';
